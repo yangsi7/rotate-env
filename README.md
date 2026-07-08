@@ -35,6 +35,13 @@ rotate --apply --root ~/code ELEVENLABS_API_KEY
 brew install yangsi7/tap/rotate
 ```
 
+**Nix** (flake):
+
+```bash
+nix run github:yangsi7/rotate-env -- --help      # run without installing
+nix profile install github:yangsi7/rotate-env    # install
+```
+
 **Install script** (any Unix with `curl`):
 
 ```bash
