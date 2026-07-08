@@ -169,6 +169,8 @@ An agent can rotate a compromised key across every project in one unattended cal
 ROTATE_NEW_VALUE="$NEW_KEY" rotate --apply --yes ELEVENLABS_API_KEY
 ```
 
+**Claude Code users:** this repo bundles a `/rotate-key` skill (`.claude/skills/rotate-key/`) that wraps the CLI with a safe, secret-never-surfaced workflow (preview, then apply with the value supplied out-of-band). It is available automatically when you work in a clone of this repo.
+
 ## Versioning
 
 This project follows [Semantic Versioning](https://semver.org/). The public surface is the flags, output format, and exit codes. See [CHANGELOG.md](CHANGELOG.md).
