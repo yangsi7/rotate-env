@@ -1,0 +1,32 @@
+name: Nix
+
+on:
+  push:
+    branches: [main, nix-flake]
+    paths: [flake.nix, flake.lock, rotate, .github/workflows/nix.yml]
+  pull_request:
+    paths: [flake.nix, flake.lock, rotate, .github/workflows/nix.yml]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Check flake
+        run: nix flake check --no-build
+      - name: Build
+        run: nix build .#rotate --print-build-logs
+      - name: Smoke-test the built binary
+        run: |
+          ./result/bin/rotate --version
+          tmp="$(mktemp -d)"
+          printf 'K=old\n' > "$tmp/.env"
+          ROTATE_NEW_VALUE=newv ./result/bin/rotate --apply --yes K --root "$tmp"
+          grep -qxF 'K=newv' "$tmp/.env"
+          echo "nix-built rotate works"
