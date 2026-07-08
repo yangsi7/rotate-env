@@ -1,6 +1,6 @@
 # rotate
 
-> Rotate a leaked or expired API-key env variable across all your `.env` and `.mcp.json` files, safely.
+> A small CLI that bulk-rotates every occurrence of an API-key env var across the `.env` and `.mcp.json` files found recursively from where you run it. Safe by hand or from an AI agent: it reads the new key from a file or env var and never surfaces it.
 
 [![CI](https://github.com/yangsi7/rotate-env/actions/workflows/ci.yml/badge.svg)](https://github.com/yangsi7/rotate-env/actions/workflows/ci.yml)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-passing-brightgreen)](https://www.shellcheck.net/)
@@ -152,6 +152,22 @@ The original quoting style, `export` prefix, and trailing comment are all preser
 - **Dry-run by default.** Nothing is written until `--apply`, and a dry-run never writes a temp file, so the new value never touches disk during a preview.
 - **Idempotent.** Re-running with the same value changes nothing. Values already equal to the new one are skipped, so files that do not contain the key are never rewritten.
 - **Atomic and reversible.** Per-file temp+`mv` with preserved permissions, plus optional `--backup` (chmod 600). Note there is no cross-file transaction: if a write fails midway, earlier files are already rotated, so use `--backup` when you want a rollback.
+
+## Safe to run from an AI agent (or CI)
+
+`rotate` is a plain command-line utility first: point it at a directory and it rotates the key across every matching file. Because it is built to never surface the secret, it is also safe to hand to an AI coding agent or a CI job, without leaking the key into a transcript, the model's context, or your logs (which is exactly the mess this tool exists to clean up).
+
+- **It never prints the secret.** All output is masked to `ab****yz`, so the value never lands in an agent transcript, a CI log, or terminal scrollback.
+- **It never puts the secret on argv.** The value is passed to `awk`/`jq` through the environment, so it cannot be captured via `ps`, shell history, or an agent's logged command line. Passing a secret as a `--value` flag is refused outright.
+- **It runs fully non-interactive.** Provide the value via `$ROTATE_NEW_VALUE`, `--value-file`, or stdin and run `--apply --yes` with no TTY. Dry-run is the default, so an agent can preview the (masked) plan before committing.
+- **It will not leak into committed files.** Placeholder and template files (`*example*`, `.env.dist`, and the like, matched case-insensitively) are never written, so an agent cannot accidentally rotate a real key into a git-tracked template.
+- **It is deterministic and parseable.** Leveled logs go to stderr, data to stdout, and exit codes are stable (`0` ok, `2` usage, `127` missing dependency), so an agent can branch on the result. Runs are idempotent, so a retry is always safe.
+
+An agent can rotate a compromised key across every project in one unattended call:
+
+```bash
+ROTATE_NEW_VALUE="$NEW_KEY" rotate --apply --yes ELEVENLABS_API_KEY
+```
 
 ## Versioning
 

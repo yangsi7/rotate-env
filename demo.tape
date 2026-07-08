@@ -24,28 +24,25 @@ Type `unset ROTATE_NEW_VALUE` Enter
 Type `clear` Enter
 Show
 
-# ---- the recording ------------------------------------------------------
+# ---- step 1: find every copy --------------------------------------------
 Sleep 800ms
-Type "# An AI agent pasted ELEVENLABS_API_KEY into every project. Find every copy:"
+Type "# An AI agent mistakenly leaked an API key. Find every copy:"
 Enter
 Sleep 500ms
 Type "rotate --list"
 Enter
-Sleep 2500ms
-
-Type "# Preview the rotation. Nothing is written, the secret is masked:"
-Enter
-Sleep 400ms
-Type "export ROTATE_NEW_VALUE='sk_live_ROTATED_2026'"
-Enter
-Sleep 300ms
-Type "rotate ELEVENLABS_API_KEY"
-Enter
-Sleep 3000ms
-
-Type "# Looks right. Rotate it everywhere, unattended:"
-Enter
-Sleep 400ms
-Type "rotate --apply --yes ELEVENLABS_API_KEY"
-Enter
 Sleep 3500ms
+
+# ---- reset the view so the replace command starts on a clean screen ------
+Hide
+Type "clear" Enter
+Show
+Sleep 700ms
+
+# ---- step 2: replace every copy with the new key ------------------------
+Type "# Now replace every copy with the new key:"
+Enter
+Sleep 600ms
+Type "ROTATE_NEW_VALUE='sk_live_ROTATED_2026' rotate --apply --yes ELEVENLABS_API_KEY"
+Enter
+Sleep 4000ms
