@@ -9,7 +9,7 @@
 
 Your AI coding agent just pasted a live API key into twelve `.env` files and three `.mcp.json` configs across half your projects. Now you have to rotate it: find every file, replace the value in whatever quoting style each one happens to use, and do it without leaking the new key into your shell history or a committed template. `rotate` does exactly that, in one command, without ever printing the secret.
 
-![rotate in action](demo.gif)
+![rotate demo: finding every copy of a leaked API key across .env and .mcp.json files, then rotating them all in one command](demo.gif)
 
 ## Quickstart
 
