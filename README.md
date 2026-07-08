@@ -9,6 +9,8 @@
 
 Your AI coding agent just pasted a live API key into twelve `.env` files and three `.mcp.json` configs across half your projects. Now you have to rotate it: find every file, replace the value in whatever quoting style each one happens to use, and do it without leaking the new key into your shell history or a committed template. `rotate` does exactly that, in one command, without ever printing the secret.
 
+![rotate in action](demo.gif)
+
 ## Quickstart
 
 ```bash
@@ -27,14 +29,22 @@ rotate --apply --root ~/code ELEVENLABS_API_KEY
 
 ## Install
 
+**Homebrew** (macOS and Linux):
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.0/install.sh | bash
+brew install yangsi7/tap/rotate
+```
+
+**Install script** (any Unix with `curl`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.1/install.sh | bash
 ```
 
 This installs `rotate` into `~/.local/bin` (no sudo). Prefer to read before you run? Inspect first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.1/install.sh
 less install.sh
 bash install.sh
 ```

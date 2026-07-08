@@ -23,7 +23,7 @@
 set -euo pipefail
 
 REPO="yangsi7/rotate-env"
-DEFAULT_VERSION="v0.1.0"
+DEFAULT_VERSION="v0.1.1"
 DL_TMP=""   # global so the EXIT trap can clean it under `set -u`
 
 info()  { printf '\033[0;34m==>\033[0m %s\n' "$*"; }
@@ -32,6 +32,21 @@ err()   { printf '\033[0;31merror:\033[0m %s\n' "$*" >&2; }
 die()   { err "$*"; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+install_usage() {
+  cat <<'EOF'
+install.sh — installer for rotate (https://github.com/yangsi7/rotate-env)
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.0/install.sh | bash
+
+Options:
+  --bin-dir <dir>   Install into <dir> (default: ~/.local/bin, fallback /usr/local/bin)
+  --version <tag>   Install a specific release tag (default: the shipped tag)
+  --uninstall       Remove an installed rotate
+  -h, --help        Show this help
+EOF
+}
 
 pkg_hint() {  # pkg_hint <tool>  -> prints a per-platform install hint
   local tool=$1
@@ -83,7 +98,7 @@ main() {
       --version)   [[ $# -ge 2 ]] || die "--version needs a tag"; version=$2; shift ;;
       --version=*) version=${1#*=} ;;
       --uninstall) uninstall=1 ;;
-      -h|--help)   sed -n '2,20p' "$0" 2>/dev/null || true; exit 0 ;;
+      -h|--help)   install_usage; exit 0 ;;
       *) die "unknown option: $1" ;;
     esac
     shift
