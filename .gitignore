@@ -1,0 +1,7 @@
+# local scratch / editor
+*.swp
+.DS_Store
+
+# transient rotate temp/backup artifacts (should never be committed)
+.rotate.*
+*.bak.*

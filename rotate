@@ -1,0 +1,499 @@
+#!/usr/bin/env bash
+#
+# rotate — rotate the VALUE of a named secret env variable in place across every
+#          .env-style and .mcp.json config file discovered under configured roots.
+#
+# Discovery is deterministic and rebuilt on every run via `fd`, so files created
+# by new projects are picked up automatically — no path is ever hardcoded.
+#
+# Handles both declaration syntaxes:
+#   .env / .envrc :  KEY=value | KEY="value" | KEY='value' | export KEY=value | KEY=
+#   .mcp.json     :  "KEY": "value"  (env / headers blocks)  and  "KEY=value"  (args[] wrapper)
+#
+# Security posture:
+#   * The secret is NEVER placed on a command line (argv is world-readable via `ps`).
+#     It is passed to awk/jq through the environment instead, and read from a file,
+#     env var, TTY prompt, or stdin — never a flag.
+#   * The secret is NEVER printed. All output is masked to `ab****yz`.
+#   * Default mode is a dry-run preview; --apply plus a confirmation is required to write.
+#   * Writes are atomic (temp file + mv), original permissions are preserved, and
+#     optional backups are chmod 600.
+#   * Template/example files are excluded by default so a real secret is never written
+#     into a git-tracked placeholder file.
+#
+# Homepage: https://github.com/yangsi7/rotate-env
+#
+# shellcheck disable=SC2016  # awk/jq programs are single-quoted on purpose (no shell expansion)
+set -euo pipefail
+IFS=$'\n\t'
+
+readonly SCRIPT_NAME=${0##*/}
+readonly VERSION="0.1.0"
+
+# ---------------------------------------------------------------------------
+# Discovery configuration
+# ---------------------------------------------------------------------------
+# Single brace-glob for fd (globset supports {a,b}); '.env.*' also matches
+# templates/yaml/backups which the FD_EXCLUDES below prune back out.
+readonly FD_GLOB='{.env,.env.*,.envrc,.mcp.json}'
+readonly FD_EXCLUDES=(
+  -E node_modules -E worktrees -E '.git' -E '.next' -E dist -E build
+  -E '*example*' -E '*sample*' -E '*template*'
+  -E '*.bak' -E '*.bak.*' -E '*.orig' -E '*.orig.*'
+  -E '*.yaml' -E '*.yml'
+)
+
+# ---------------------------------------------------------------------------
+# awk / jq programs (contain NO embedded quote chars; quotes arrive via -v/env)
+# ---------------------------------------------------------------------------
+# Rewrites matching .env lines. Reads the new/old secret from the environment
+# (ENVIRON["VAL"], ENVIRON["OLDV"]) so the secret never appears in argv.
+# Replaces only when the current value differs (idempotent) and, when an old
+# value is supplied, only when it matches. Emits "<found>\t<changed>" on stderr;
+# edited content goes to stdout.
+readonly AWK_UPDATE='
+BEGIN { val = ENVIRON["VAL"]; oldv = ENVIRON["OLDV"] }
+{
+  line = $0
+  p = line
+  sub(/^[ \t]*/, "", p)
+  sub(/^export[ \t]+/, "", p)
+  eq = index(p, "=")
+  handled = 0
+  if (eq > 1) {
+    k = substr(p, 1, eq - 1)
+    sub(/[ \t]+$/, "", k)
+    if (k == key) {
+      found++
+      oeq = index(line, "=")
+      pre = substr(line, 1, oeq)
+      rest = substr(line, oeq + 1)
+      lead = rest
+      sub(/[^ \t].*$/, "", lead)          # leading whitespace of value region
+      body = substr(rest, length(lead) + 1)
+      c = substr(body, 1, 1)
+      if (c == dq || c == sq) {
+        q = c
+        inner = substr(body, 2)
+        idx = index(inner, q)
+        if (idx > 0) { cur = substr(inner, 1, idx - 1); trailer = substr(inner, idx + 1) }
+        else         { cur = inner;                     trailer = "" }
+      } else {
+        q = ""
+        sp = match(body, /[ \t]/)
+        if (sp > 0) { cur = substr(body, 1, sp - 1); trailer = substr(body, sp) }
+        else        { cur = body;                    trailer = "" }
+      }
+      if ((oldset == "0" || cur == oldv) && cur != val) {
+        print pre lead q val q trailer
+        n++
+        handled = 1
+      }
+    }
+  }
+  if (!handled) print line
+}
+END { printf "%d\t%d\n", found + 0, n + 0 > "/dev/stderr" }
+'
+
+# walk/1 prelude so jq 1.5 works too (builtin in 1.6+).
+readonly JQ_WALK='def walk(f): . as $in
+  | if type == "object" then reduce keys_unsorted[] as $wk ({}; . + {($wk): ($in[$wk] | walk(f))}) | f
+    elif type == "array" then map(walk(f)) | f
+    else f end;'
+
+# Counts occurrences: object keys named $k, plus array/string wrappers "$k=...".
+readonly JQ_COUNT='[ (.. | objects | select(has($k))), (.. | strings | select(startswith($k + "="))) ] | length'
+
+# Counts occurrences that WOULD actually change (respects old-value filter, skips
+# values already equal to the new one). Secret arrives via $ENV, not argv.
+readonly JQ_CHANGED='[
+  (.. | objects | select(has($k)) | .[$k]
+     | select(($oldset == "0" or . == $ENV.jqold) and . != $ENV.jqv)),
+  (.. | strings | select(startswith($k + "="))
+     | select(($oldset == "0" or . == ($k + "=" + $ENV.jqold)) and . != ($k + "=" + $ENV.jqv)))
+] | length'
+
+# Rewrites every occurrence. New/old secret arrive via $ENV (not argv).
+readonly JQ_EDIT="$JQ_WALK"'
+walk(
+  if type == "object" and has($k) then
+    (if ($oldset == "0" or (.[$k] == $ENV.jqold)) then .[$k] = $ENV.jqv else . end)
+  elif type == "string" and startswith($k + "=") then
+    (if ($oldset == "0" or (. == ($k + "=" + $ENV.jqold))) then ($k + "=" + $ENV.jqv) else . end)
+  else . end)'
+
+# ---------------------------------------------------------------------------
+# State
+# ---------------------------------------------------------------------------
+VERBOSE=0
+APPLY=0
+ASSUME_YES=0
+BACKUP=0
+DO_LIST=0
+KEY=""
+VALUE=""
+VALUE_FILE=""
+OLD_VALUE=""
+OLD_VALUE_FILE=""
+OLD_SET=0
+MAX_DEPTH=""
+FD_BIN=""
+REC_ROOTS=()
+SHAL_ROOTS=()
+ROOTS_OVERRIDDEN=0
+_tmpfiles=()
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+cleanup() { [[ ${#_tmpfiles[@]} -gt 0 ]] && rm -f -- "${_tmpfiles[@]}" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+
+log() {  # log <level> <msg...>   (everything to stderr; stdout stays data-clean)
+  local lvl=$1; shift
+  [[ $lvl == debug && $VERBOSE -eq 0 ]] && return 0
+  local c='' r=''
+  if [[ -t 2 ]]; then
+    r=$'\e[0m'
+    case $lvl in
+      error) c=$'\e[31m' ;; warn) c=$'\e[33m' ;;
+      ok)    c=$'\e[32m' ;; debug) c=$'\e[90m' ;;
+    esac
+  fi
+  printf '%s[%s]%s %s\n' "$c" "$lvl" "$r" "$*" >&2
+}
+
+die() { log error "$1"; exit "${2:-1}"; }
+
+# usage error: message + hint + exit 2
+uerr() { log error "$1"; log error "Try '$SCRIPT_NAME --help'."; exit 2; }
+
+mask() {  # never reveal more than 2+2 chars of a secret
+  local s=$1 len=${#1}
+  if   (( len == 0 )); then printf '(empty)'
+  elif (( len <= 8 )); then printf '****'
+  else printf '%s****%s' "${s:0:2}" "${s: -2}"; fi
+}
+
+copy_perms() {  # copy_perms <src> <dst>
+  local mode
+  mode=$(stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || true)
+  [[ -n $mode ]] && chmod "$mode" "$2" 2>/dev/null || true
+}
+
+detect_deps() {
+  FD_BIN=$(command -v fd 2>/dev/null || command -v fdfind 2>/dev/null || true)
+  [[ -n $FD_BIN ]] || die "required command not found: fd (Debian/Ubuntu package 'fd-find', binary 'fdfind')" 127
+  command -v awk >/dev/null 2>&1 || die "required command not found: awk" 127
+}
+
+usage() {
+  cat <<EOF
+$SCRIPT_NAME $VERSION — rotate a secret env variable's value across .env* and .mcp.json files
+
+USAGE
+  $SCRIPT_NAME [options] <VAR_NAME>
+
+  Discovers every target file under the search roots (rebuilt each run via fd),
+  then replaces the VALUE of <VAR_NAME> wherever it is declared. Default is a masked
+  DRY-RUN preview; pass --apply to write.
+
+QUICKSTART
+  # 1) Dry-run — see every file that holds the key (writes NOTHING):
+  $SCRIPT_NAME SOME_API_KEY_ENV_VAR
+
+  # 2) Rotate it everywhere, unattended:
+  ROTATE_NEW_VALUE='sk_your_new_api_key_value' $SCRIPT_NAME --apply --yes SOME_API_KEY_ENV_VAR
+
+ARGUMENTS
+  <VAR_NAME>            Variable/key to rotate, e.g. ELEVENLABS_API_KEY
+                       (matches [A-Za-z_][A-Za-z0-9_.-]* — env keys and JSON header keys)
+
+PROVIDING THE NEW VALUE  (the secret is never taken from the command line)
+  --value-file <path>  Read new value from a file (trailing newline stripped)
+  \$ROTATE_NEW_VALUE     Read new value from this env var
+  (interactive)        If a TTY and none of the above, prompt silently (read -s)
+  (pipe)               Otherwise read one line from stdin
+
+OPTIONS
+  -n, --dry-run        Preview changes without writing (this is the default)
+      --apply          Actually write changes (prompts for confirmation)
+  -y, --yes            Skip the confirmation prompt (required for non-interactive --apply)
+  -b, --backup         Copy each file to <file>.bak.<ts> (chmod 600) before writing
+      --old-value-file <path>   Only replace occurrences whose CURRENT value matches
+      \$ROTATE_OLD_VALUE          Same, via env var (surgical rotation)
+      --root <dir>          Recursive search root (repeatable; replaces the default)
+      --shallow-root <dir>  Depth-1 search root  (repeatable)
+      --max-depth <n>       Limit recursion depth of --root/default roots
+      --list           List the discovered target files and exit (no VAR needed)
+  -v, --verbose        Enable debug logging
+  -V, --version        Print version and exit
+  -h, --help           Show this help
+
+SEARCH ROOTS
+  Default (no --root/--shallow-root given): the current directory, recursively.
+  Give --root/--shallow-root (each repeatable) to search elsewhere; any explicit
+  root replaces the default. Files under node_modules/worktrees/.git and
+  example/sample/template/backup files are always excluded.
+
+EXAMPLES
+  # ---- the usual flow: preview, then apply --------------------------------
+  # See which files hold the key (writes nothing):
+  $SCRIPT_NAME --list
+  # Dry-run preview (prompts silently for the new value):
+  $SCRIPT_NAME ELEVENLABS_API_KEY
+  # Commit it (prompts value, then confirms before writing):
+  $SCRIPT_NAME --apply ELEVENLABS_API_KEY
+
+  # ---- feeding the new value without a prompt (secret never on the argv) ----
+  $SCRIPT_NAME --apply --value-file ~/new-elevenlabs.key ELEVENLABS_API_KEY
+  ROTATE_NEW_VALUE='sk_live_...' $SCRIPT_NAME --apply ELEVENLABS_API_KEY
+  pbpaste | $SCRIPT_NAME --apply ELEVENLABS_API_KEY        # confirm still asked on the TTY
+
+  # ---- safety / automation options ----------------------------------------
+  # Timestamped 0600 backup of every file before editing it:
+  $SCRIPT_NAME --apply --backup --value-file ~/new.key SUPABASE_SERVICE_ROLE_KEY
+  # Fully non-interactive (CI / another script): value + skip confirmation:
+  ROTATE_NEW_VALUE='fc-new' $SCRIPT_NAME --apply --yes FIRECRAWL_API_KEY
+  # Surgical: only replace occurrences whose CURRENT value is the leaked one:
+  ROTATE_OLD_VALUE='sk_leaked' ROTATE_NEW_VALUE='sk_fresh' \\
+      $SCRIPT_NAME --apply --yes ANTHROPIC_API_KEY
+
+  # ---- scoping the search --------------------------------------------------
+  # Rotate across every project under a directory tree:
+  $SCRIPT_NAME --apply --root ~/code GEMINI_API_KEY
+  # Several roots + a shallow (depth-1) root (e.g. home dotfiles), verbose:
+  $SCRIPT_NAME -v --root ~/work/api --root ~/work/web --shallow-root ~/ PERPLEXITY_API_KEY
+  # Rotate a JSON header key (.mcp.json headers block uses hyphenated names):
+  $SCRIPT_NAME --apply x-ref-api-key
+
+NOTES
+  * Edits are atomic per file, but there is no cross-file transaction: if a write
+    fails midway, earlier files are already rotated. Use --backup for rollback.
+  * Requires: bash, fd (or fdfind), and jq (jq only for .mcp.json files).
+
+EXIT CODES
+  0 ok   1 error   2 usage error   127 missing dependency
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -h|--help)    usage; exit 0 ;;
+      -V|--version) printf '%s %s\n' "$SCRIPT_NAME" "$VERSION"; exit 0 ;;
+      -v|--verbose) VERBOSE=1 ;;
+      -n|--dry-run) APPLY=0 ;;
+      --apply)      APPLY=1 ;;
+      -y|--yes)     ASSUME_YES=1 ;;
+      -b|--backup)  BACKUP=1 ;;
+      --list)       DO_LIST=1 ;;
+      --value-file)      [[ $# -ge 2 ]] || uerr "--value-file requires a path"; VALUE_FILE=$2; shift ;;
+      --value-file=*)    VALUE_FILE=${1#*=} ;;
+      --old-value-file)  [[ $# -ge 2 ]] || uerr "--old-value-file requires a path"; OLD_VALUE_FILE=$2; shift ;;
+      --old-value-file=*) OLD_VALUE_FILE=${1#*=} ;;
+      --root)        [[ $# -ge 2 ]] || uerr "--root requires a directory"; REC_ROOTS+=("$2"); ROOTS_OVERRIDDEN=1; shift ;;
+      --root=*)      REC_ROOTS+=("${1#*=}"); ROOTS_OVERRIDDEN=1 ;;
+      --shallow-root)   [[ $# -ge 2 ]] || uerr "--shallow-root requires a directory"; SHAL_ROOTS+=("$2"); ROOTS_OVERRIDDEN=1; shift ;;
+      --shallow-root=*) SHAL_ROOTS+=("${1#*=}"); ROOTS_OVERRIDDEN=1 ;;
+      --max-depth)   [[ $# -ge 2 ]] || uerr "--max-depth requires a number"; MAX_DEPTH=$2; shift ;;
+      --max-depth=*) MAX_DEPTH=${1#*=} ;;
+      --value|--old-value)
+        uerr "refusing to read a secret from the command line ($1); use --value-file, \$ROTATE_NEW_VALUE, a prompt, or stdin" ;;
+      --) shift; break ;;
+      -*) uerr "unknown option: $1" ;;
+      *)  if [[ -z $KEY ]]; then KEY=$1; else uerr "unexpected extra argument: $1"; fi ;;
+    esac
+    shift
+  done
+  while [[ $# -gt 0 ]]; do
+    if [[ -z $KEY ]]; then KEY=$1; else uerr "unexpected extra argument: $1"; fi
+    shift
+  done
+  if [[ -n $MAX_DEPTH && ! $MAX_DEPTH =~ ^[0-9]+$ ]]; then uerr "--max-depth must be a non-negative integer"; fi
+}
+
+resolve_roots() {
+  if [[ $ROOTS_OVERRIDDEN -eq 0 ]]; then
+    REC_ROOTS=("$PWD")
+    SHAL_ROOTS=()
+  fi
+}
+
+discover() {  # prints NUL-delimited target paths
+  local r
+  local -a depth_opt=()
+  [[ -n $MAX_DEPTH ]] && depth_opt=(-d "$MAX_DEPTH")
+  for r in ${REC_ROOTS[@]+"${REC_ROOTS[@]}"}; do
+    [[ -d $r ]] || { log warn "recursive root missing, skipping: $r"; continue; }
+    "$FD_BIN" -H -I -t f -0 ${depth_opt[@]+"${depth_opt[@]}"} "${FD_EXCLUDES[@]}" -g "$FD_GLOB" "$r" || true
+  done
+  for r in ${SHAL_ROOTS[@]+"${SHAL_ROOTS[@]}"}; do
+    [[ -d $r ]] || { log warn "shallow root missing, skipping: $r"; continue; }
+    "$FD_BIN" -H -I -t f -0 -d 1 "${FD_EXCLUDES[@]}" -g "$FD_GLOB" "$r" || true
+  done
+}
+
+acquire_value() {
+  if   [[ -n $VALUE_FILE ]]; then
+    [[ -r $VALUE_FILE ]] || die "value-file not readable: $VALUE_FILE" 2
+    VALUE=$(<"$VALUE_FILE")
+  elif [[ -n ${ROTATE_NEW_VALUE:-} ]]; then
+    VALUE=$ROTATE_NEW_VALUE
+  elif [[ -t 0 ]]; then
+    read -rsp "New value for $KEY: " VALUE; printf '\n' >&2
+  else
+    IFS= read -r VALUE || true
+  fi
+  VALUE=${VALUE%$'\n'}
+  VALUE=${VALUE%$'\r'}
+  [[ -n $VALUE ]] || die "empty new value; refusing to blank the variable" 2
+}
+
+acquire_old_value() {
+  if   [[ -n $OLD_VALUE_FILE ]]; then
+    [[ -r $OLD_VALUE_FILE ]] || die "old-value-file not readable: $OLD_VALUE_FILE" 2
+    OLD_VALUE=$(<"$OLD_VALUE_FILE"); OLD_SET=1
+  elif [[ -n ${ROTATE_OLD_VALUE:-} ]]; then
+    OLD_VALUE=$ROTATE_OLD_VALUE; OLD_SET=1
+  fi
+  OLD_VALUE=${OLD_VALUE%$'\n'}
+  OLD_VALUE=${OLD_VALUE%$'\r'}
+}
+
+# Detection is READ-ONLY: nothing is written to disk (so no secret ever lands in a
+# temp file during a dry-run). Each detect_* echoes "<found> <willchange>".
+detect_env() {  # detect_env <file>
+  local file=$1 counts found changed
+  counts=$(VAL="$VALUE" OLDV="$OLD_VALUE" \
+           awk -v key="$KEY" -v oldset="$OLD_SET" -v sq="'" -v dq='"' \
+               "$AWK_UPDATE" "$file" 2>&1 >/dev/null) \
+    || die "awk failed processing $file"
+  found=${counts%%$'\t'*}; changed=${counts##*$'\t'}
+  printf '%s %s\n' "${found:-0}" "$([[ ${changed:-0} -gt 0 ]] && echo 1 || echo 0)"
+}
+
+detect_json() {  # detect_json <file>
+  local file=$1 found changed
+  if ! command -v jq >/dev/null 2>&1; then
+    log warn "jq not installed; skipping JSON file $file"; printf '0 0\n'; return 0
+  fi
+  found=$(jq --arg k "$KEY" "$JQ_COUNT" "$file" 2>/dev/null) || {
+    log warn "invalid JSON, skipping: $file"; printf '0 0\n'; return 0; }
+  changed=$(jqv="$VALUE" jqold="$OLD_VALUE" \
+            jq --arg k "$KEY" --arg oldset "$OLD_SET" "$JQ_CHANGED" "$file" 2>/dev/null) || changed=0
+  printf '%s %s\n' "${found:-0}" "$([[ ${changed:-0} -gt 0 ]] && echo 1 || echo 0)"
+}
+
+# commit_file writes the edited content atomically. Called ONLY under --apply, and
+# ONLY for files detection said would change. The secret exists on disk only in the
+# same-dir mktemp (0600) for the instant between write and the atomic mv.
+commit_file() {  # commit_file <file>
+  local file=$1 dir tmp
+  dir=$(dirname -- "$file")
+  tmp=$(mktemp "$dir/.rotate.XXXXXX"); _tmpfiles+=("$tmp")
+  if [[ $file == *.json ]]; then
+    jqv="$VALUE" jqold="$OLD_VALUE" \
+      jq --arg k "$KEY" --arg oldset "$OLD_SET" "$JQ_EDIT" "$file" >"$tmp" 2>/dev/null \
+      || die "jq edit failed writing $file"
+    [[ -s $tmp ]] || die "refusing to write empty output for $file"
+  else
+    VAL="$VALUE" OLDV="$OLD_VALUE" \
+      awk -v key="$KEY" -v oldset="$OLD_SET" -v sq="'" -v dq='"' \
+          "$AWK_UPDATE" "$file" >"$tmp" 2>/dev/null \
+      || die "awk edit failed writing $file"
+  fi
+  if [[ $BACKUP -eq 1 ]]; then
+    local bak; bak="$file.bak.$(date +%Y%m%d%H%M%S)"
+    cp -p -- "$file" "$bak"; chmod 600 "$bak"; log debug "backup: $bak"
+  fi
+  copy_perms "$file" "$tmp"
+  mv -f -- "$tmp" "$file"
+}
+
+main() {
+  parse_args "$@"
+  detect_deps
+  resolve_roots
+
+  # auto-help: nothing to do without a VAR (and not just listing)
+  if [[ $DO_LIST -eq 0 && -z $KEY ]]; then usage >&2; exit 2; fi
+  if [[ -n $KEY && ! $KEY =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]]; then uerr "invalid variable name: $KEY"; fi
+
+  # --- discover ------------------------------------------------------------
+  local -a TARGETS=()
+  local f
+  while IFS= read -r -d '' f; do TARGETS+=("$f"); done < <(discover)
+
+  log debug "roots(recursive)=${REC_ROOTS[*]+"${REC_ROOTS[*]}"}"
+  log debug "roots(depth-1)=${SHAL_ROOTS[*]+"${SHAL_ROOTS[*]}"}"
+  log info "discovered ${#TARGETS[@]} candidate file(s)"
+
+  if [[ $DO_LIST -eq 1 ]]; then
+    [[ ${#TARGETS[@]} -gt 0 ]] && printf '%s\n' "${TARGETS[@]}"
+    exit 0
+  fi
+
+  [[ ${#TARGETS[@]} -gt 0 ]] || { log warn "no target files found; nothing to do"; exit 0; }
+
+  acquire_value
+  acquire_old_value
+  local masked; masked=$(mask "$VALUE")
+  if [[ $OLD_SET -eq 1 ]]; then
+    log info "rotating '$KEY' -> new value $masked (only where current value is $(mask "$OLD_VALUE"))"
+  else
+    log info "rotating '$KEY' -> new value $masked"
+  fi
+
+  # --- pass 1: detect (read-only; nothing written to disk) -----------------
+  local -a CHG_FILE=()
+  local total_found=0 total_files_found=0
+  for f in "${TARGETS[@]}"; do
+    local res found willchange
+    if [[ $f == *.json ]]; then res=$(detect_json "$f"); else res=$(detect_env "$f"); fi
+    found=${res% *}; willchange=${res#* }
+    if [[ ${found:-0} -gt 0 ]]; then
+      total_found=$((total_found + found))
+      total_files_found=$((total_files_found + 1))
+      log debug "found $found occurrence(s) in $f (willchange=$willchange)"
+    fi
+    [[ ${willchange:-0} -eq 1 ]] && CHG_FILE+=("$f")
+  done
+
+  log info "'$KEY' present in $total_files_found file(s), $total_found occurrence(s); ${#CHG_FILE[@]} file(s) would change"
+
+  if [[ ${#CHG_FILE[@]} -eq 0 ]]; then
+    log ok "nothing to update (variable absent, or already equal to new value)"
+    exit 0
+  fi
+
+  # --- dry-run: report and stop --------------------------------------------
+  if [[ $APPLY -eq 0 ]]; then
+    log warn "DRY-RUN — no files written. Re-run with --apply to commit. Files that would change:"
+    local i
+    for i in "${!CHG_FILE[@]}"; do printf '  ~ %s\n' "${CHG_FILE[$i]}" >&2; done
+    exit 0
+  fi
+
+  # --- apply: confirm then commit ------------------------------------------
+  if [[ $ASSUME_YES -eq 0 ]]; then
+    if [[ -e /dev/tty ]]; then
+      local ans
+      read -rp "Apply new value of '$KEY' ($masked) to ${#CHG_FILE[@]} file(s)? [y/N] " ans < /dev/tty
+      [[ $ans == [yY]* ]] || { log info "aborted by user"; exit 0; }
+    else
+      die "refusing to --apply without a TTY for confirmation; pass --yes" 2
+    fi
+  fi
+
+  local i changed=0
+  for i in "${!CHG_FILE[@]}"; do
+    commit_file "${CHG_FILE[$i]}"
+    changed=$((changed + 1))
+    log ok "updated ${CHG_FILE[$i]}"
+  done
+  log ok "rotated '$KEY' in $changed file(s)"
+}
+
+main "$@"
