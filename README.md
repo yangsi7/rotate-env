@@ -38,13 +38,13 @@ brew install yangsi7/tap/rotate
 **Install script** (any Unix with `curl`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.3/install.sh | bash
 ```
 
 This installs `rotate` into `~/.local/bin` (no sudo). Prefer to read before you run? Inspect first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh
+curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.3/install.sh
 less install.sh
 bash install.sh
 ```
@@ -55,7 +55,7 @@ bash install.sh
 ```bash
 git clone https://github.com/yangsi7/rotate-env.git
 cd rotate-env
-make install          # symlinks rotate into ~/.local/bin (override with PREFIX=...)
+make install          # copies rotate into ~/.local/bin (override with PREFIX=...)
 # or just copy it anywhere on your PATH:
 install -m 755 rotate ~/.local/bin/rotate
 ```
@@ -63,7 +63,7 @@ install -m 755 rotate ~/.local/bin/rotate
 Uninstall with `make uninstall`, or `bash install.sh --uninstall`.
 </details>
 
-**Requirements:** `bash`, [`fd`](https://github.com/sharkdp/fd) (Debian/Ubuntu: `fd-find`, binary `fdfind`), and [`jq`](https://jqlang.github.io/jq/) (only for `.mcp.json` files).
+**Requirements:** `bash`, `awk`, and [`fd`](https://github.com/sharkdp/fd) (Debian/Ubuntu: `fd-find`, binary `fdfind`). [`jq`](https://jqlang.github.io/jq/) is needed only for `.mcp.json` files.
 
 ## Use cases
 
@@ -142,7 +142,7 @@ The original quoting style, `export` prefix, and trailing comment are all preser
 
 ## How it works
 
-1. **Discover** target files with `fd` on every run (so new projects are picked up automatically). `node_modules`, git worktrees, `.git`, and example/sample/template/backup files are excluded so a real secret is never written into a committed placeholder.
+1. **Discover** target files with `fd` on every run (so new projects are picked up automatically). Directories named `node_modules`, `worktrees`, `.git`, `.next`, `dist`, `build` are pruned; `*.yaml`/`*.yml` files are skipped; and placeholder files (`*example*`, `*sample*`, `*template*`, `.env.dist`, `.env.tmpl`, `.env.defaults`, matched case-insensitively) plus `.bak`/`.orig` backups are excluded so a real secret is never written into a committed placeholder.
 2. **Edit** `.env` files with `awk` (literal, quote-aware, exact-key) and `.mcp.json` with `jq walk` (covers env/headers/args).
 3. **Write** atomically: a same-directory temp file, then `mv`, preserving the original permissions.
 

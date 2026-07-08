@@ -231,3 +231,29 @@ dryrun()  { ROTATE_NEW_VALUE="$NEWVAL" run "$ROTATE" "$@" --root "$FIX"; }
   run "$ROTATE" --list --root "$P"
   [[ "$output" != *".bak."* ]]
 }
+
+@test "placeholder/template files are never rotated (case-insensitive, incl .dist/.tmpl/.defaults)" {
+  P="$FIX/ph"; mkdir -p "$P"
+  ph=(.env.example .env.Sample .env.TEMPLATE .env.dist .env.tmpl .env.defaults)
+  for f in "${ph[@]}"; do printf 'SECRET_KEY=placeholder\n' > "$P/$f"; done
+  printf 'SECRET_KEY=real_old\n' > "$P/.env"
+  ROTATE_NEW_VALUE='sk_real_new' run "$ROTATE" --apply --yes SECRET_KEY --root "$P"
+  [ "$status" -eq 0 ]
+  grep -qxF 'SECRET_KEY=sk_real_new' "$P/.env"          # real file rotated
+  for f in "${ph[@]}"; do                               # no placeholder touched
+    grep -qxF 'SECRET_KEY=placeholder' "$P/$f" || { echo "LEAKED into $f"; return 1; }
+  done
+  run "$ROTATE" --list --root "$P"                       # not even discovered
+  [[ "$output" != *".env.dist"* ]]
+  [[ "$output" != *".env.Sample"* ]]
+}
+
+@test "new value containing an embedded newline is refused" {
+  D="$FIX/nl"; mkdir -p "$D"; printf 'K=old\n' > "$D/.env"
+  printf 'line1\nINJECTED=true\n' > "$D/payload"
+  run "$ROTATE" --apply --yes --value-file "$D/payload" K --root "$D"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"embedded newline"* ]]
+  grep -qxF 'K=old' "$D/.env"                            # unchanged
+  [[ "$(wc -l < "$D/.env")" -eq 1 ]]                     # no injected line
+}

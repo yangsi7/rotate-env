@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-08
+
+### Security
+- **Placeholder exclusion is now case-insensitive and broader.** The template/example
+  exclusion was a case-sensitive `fd` substring denylist, so a real secret could be
+  written into `.env.Sample`/`.env.Template`/`.env.EXAMPLE` (case variants) and into
+  `.env.dist`/`.env.tmpl`/`.env.defaults` (common conventions that were not listed) --
+  files that are typically git-tracked, so the next commit would publish the secret.
+  Discovery now applies an authoritative case-insensitive `is_placeholder()` filter
+  (example/sample/template/.dist/.tmpl/.tpl/.defaults/.bak/.orig/.yaml/.yml) in addition
+  to the `fd` prune, so a secret is never written into a placeholder regardless of case.
+- **Reject new values containing an embedded newline or carriage return.** Previously an
+  embedded newline in the new value could inject additional lines into a `.env` (the JSON
+  path was already safe); such values are now refused.
+- Backups are created with `install -m 600` (atomic mode) instead of `cp -p` + `chmod`,
+  removing the brief window where a backup existed at the source's looser mode.
+
+### Fixed
+- `README` "symlinks rotate" corrected to "copies" (the Makefile copies, it does not symlink).
+- Docs now list the full exclusion set (`.next`/`dist`/`build`, `*.yaml`/`*.yml`) and reword
+  "git worktrees" to "directories named `worktrees`" (the tool has no git-worktree awareness).
+- `awk` is documented as a required dependency (README + `--help`).
+- Removed em-dashes from human-facing `--help` and log output (house style).
+
+### Changed
+- Pinned the ShellCheck GitHub Action to a released tag instead of `@master`.
+
 ## [0.1.2] - 2026-07-08
 
 ### Fixed
@@ -56,7 +83,8 @@ Initial public release.
   `--bin-dir`, `--version` pin) and a `Makefile` (`install` / `uninstall` / `test` / `lint`).
 - ShellCheck + bats CI on Linux and macOS.
 
-[Unreleased]: https://github.com/yangsi7/rotate-env/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/yangsi7/rotate-env/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/yangsi7/rotate-env/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/yangsi7/rotate-env/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yangsi7/rotate-env/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yangsi7/rotate-env/releases/tag/v0.1.0
