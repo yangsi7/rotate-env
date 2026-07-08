@@ -176,9 +176,12 @@ mask() {  # never reveal more than 2+2 chars of a secret
   else printf '%s****%s' "${s:0:2}" "${s: -2}"; fi
 }
 
+file_mode() {  # file_mode <path> -> octal perms (GNU stat -c first; BSD stat -f falls through)
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null || true
+}
+
 copy_perms() {  # copy_perms <src> <dst>
-  local mode
-  mode=$(stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null || true)
+  local mode; mode=$(file_mode "$1")
   [[ -n $mode ]] && chmod "$mode" "$2" 2>/dev/null || true
 }
 

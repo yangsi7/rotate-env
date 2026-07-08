@@ -217,13 +217,13 @@ dryrun()  { ROTATE_NEW_VALUE="$NEWVAL" run "$ROTATE" "$@" --root "$FIX"; }
   grep -qxF 'K=newv' "$P/.env"
 
   # original perms preserved
-  mode="$(stat -f '%Lp' "$P/.env" 2>/dev/null || stat -c '%a' "$P/.env")"
+  mode="$(stat -c '%a' "$P/.env" 2>/dev/null || stat -f '%Lp' "$P/.env")"
   [ "$mode" = "640" ]
 
   # backup exists, is 0600, holds old value
   bak="$(find "$P" -name '.env.bak.*')"
   [ -n "$bak" ]
-  bmode="$(stat -f '%Lp' "$bak" 2>/dev/null || stat -c '%a' "$bak")"
+  bmode="$(stat -c '%a' "$bak" 2>/dev/null || stat -f '%Lp' "$bak")"
   [ "$bmode" = "600" ]
   grep -qxF 'K=old' "$bak"
 

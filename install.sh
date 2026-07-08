@@ -24,6 +24,7 @@ set -euo pipefail
 
 REPO="yangsi7/rotate-env"
 DEFAULT_VERSION="v0.1.0"
+DL_TMP=""   # global so the EXIT trap can clean it under `set -u`
 
 info()  { printf '\033[0;34m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[0;33mwarn:\033[0m %s\n' "$*" >&2; }
@@ -106,14 +107,14 @@ main() {
 
   local url="https://raw.githubusercontent.com/$REPO/$version/rotate"
   local dest="$bin_dir/rotate"
-  local tmp; tmp=$(mktemp)
-  trap 'rm -f -- "$tmp"' EXIT
+  DL_TMP=$(mktemp)
+  trap 'rm -f -- "${DL_TMP:-}"' EXIT
 
   info "downloading rotate ($version)"
-  download "$url" "$tmp" || die "download failed from $url"
-  head -1 "$tmp" | grep -q '^#!' || die "downloaded file does not look like a script"
+  download "$url" "$DL_TMP" || die "download failed from $url"
+  head -1 "$DL_TMP" | grep -q '^#!' || die "downloaded file does not look like a script"
 
-  install -m 755 "$tmp" "$dest" 2>/dev/null || { cp -f -- "$tmp" "$dest"; chmod 755 "$dest"; }
+  install -m 755 "$DL_TMP" "$dest" 2>/dev/null || { cp -f -- "$DL_TMP" "$dest"; chmod 755 "$dest"; }
   info "installed $dest"
 
   if ! on_path "$bin_dir"; then
