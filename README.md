@@ -38,13 +38,13 @@ brew install yangsi7/tap/rotate
 **Install script** (any Unix with `curl`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh | bash
 ```
 
 This installs `rotate` into `~/.local/bin` (no sudo). Prefer to read before you run? Inspect first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh
 less install.sh
 bash install.sh
 ```

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-08
+
+### Fixed
+- `rotate --version` now reports the release version (was pinned at `0.1.0`), so the
+  Homebrew formula's version test passes and `--version` matches the installed tag.
+
 ## [0.1.1] - 2026-07-08
 
 ### Fixed
@@ -50,6 +56,7 @@ Initial public release.
   `--bin-dir`, `--version` pin) and a `Makefile` (`install` / `uninstall` / `test` / `lint`).
 - ShellCheck + bats CI on Linux and macOS.
 
-[Unreleased]: https://github.com/yangsi7/rotate-env/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/yangsi7/rotate-env/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/yangsi7/rotate-env/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/yangsi7/rotate-env/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/yangsi7/rotate-env/releases/tag/v0.1.0

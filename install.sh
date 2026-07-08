@@ -3,10 +3,10 @@
 # install.sh — installer for `rotate` (https://github.com/yangsi7/rotate-env)
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.0/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh | bash
 #
 # Prefer to inspect first (recommended):
-#   curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.0/install.sh
+#   curl -fsSLO https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh
 #   less install.sh
 #   bash install.sh
 #
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 REPO="yangsi7/rotate-env"
-DEFAULT_VERSION="v0.1.1"
+DEFAULT_VERSION="v0.1.2"
 DL_TMP=""   # global so the EXIT trap can clean it under `set -u`
 
 info()  { printf '\033[0;34m==>\033[0m %s\n' "$*"; }
@@ -38,7 +38,7 @@ install_usage() {
 install.sh — installer for rotate (https://github.com/yangsi7/rotate-env)
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.0/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/yangsi7/rotate-env/v0.1.2/install.sh | bash
 
 Options:
   --bin-dir <dir>   Install into <dir> (default: ~/.local/bin, fallback /usr/local/bin)
