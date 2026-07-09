@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <!-- rotate/refresh loop around the key: ~290 deg major arc, gap on the right -->
+  <g fill="none" stroke="#a6e3a1" stroke-width="24" stroke-linecap="round">
+    <path d="M 320 290 A 150 150 0 1 1 322 122" />
+  </g>
+  <!-- arrowhead at the top-right end, pointing down-right into the gap (clockwise cycle) -->
+  <path d="M 322 122 L 360 118 L 336 162 Z" fill="#a6e3a1"/>
+
+  <!-- KEY, tilted for a bit of energy -->
+  <g transform="rotate(-16 200 208)">
+    <!-- shaft -->
+    <rect x="188" y="150" width="26" height="150" rx="9" fill="#f9e2af"/>
+    <!-- teeth -->
+    <rect x="214" y="252" width="24" height="18" rx="4" fill="#f9e2af"/>
+    <rect x="214" y="284" width="38" height="18" rx="4" fill="#f9e2af"/>
+    <!-- bow (the head) -->
+    <circle cx="200" cy="128" r="66" fill="#f9e2af"/>
+    <!-- worried "oh no" face on the bow -->
+    <circle cx="180" cy="120" r="9" fill="#1e1e2e"/>
+    <circle cx="220" cy="120" r="9" fill="#1e1e2e"/>
+    <ellipse cx="200" cy="150" rx="10" ry="14" fill="#1e1e2e"/>
+  </g>
+
+  <!-- sweat drop (the funny beat) -->
+  <path d="M 288 92 q 15 22 0 34 q -15 -12 0 -34 Z" fill="#89dceb"/>
+</svg>
