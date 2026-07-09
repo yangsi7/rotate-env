@@ -1,11 +1,19 @@
-# rotate
+<p align="center">
+  <img src="assets/icon.svg" width="140" alt="rotate logo: a key with a worried face wrapped in a rotate arrow">
+</p>
 
-> A small CLI that bulk-rotates every occurrence of an API-key env var across the `.env` and `.mcp.json` files found recursively from where you run it. Safe by hand or from an AI agent: it reads the new key from a file or env var and never surfaces it.
+<h1 align="center">rotate</h1>
 
-[![CI](https://github.com/yangsi7/rotate-env/actions/workflows/ci.yml/badge.svg)](https://github.com/yangsi7/rotate-env/actions/workflows/ci.yml)
-[![ShellCheck](https://img.shields.io/badge/shellcheck-passing-brightgreen)](https://www.shellcheck.net/)
-[![Release](https://img.shields.io/github/v/release/yangsi7/rotate-env?sort=semver)](https://github.com/yangsi7/rotate-env/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  A small CLI that bulk-rotates every occurrence of an API-key env var across the <code>.env</code> and <code>.mcp.json</code> files found recursively from where you run it. Safe by hand or from an AI agent: it reads the new key from a file or env var and never surfaces it.
+</p>
+
+<p align="center">
+  <a href="https://github.com/yangsi7/rotate-env/actions/workflows/ci.yml"><img src="https://github.com/yangsi7/rotate-env/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://www.shellcheck.net/"><img src="https://img.shields.io/badge/shellcheck-passing-brightgreen" alt="ShellCheck"></a>
+  <a href="https://github.com/yangsi7/rotate-env/releases"><img src="https://img.shields.io/github/v/release/yangsi7/rotate-env?sort=semver" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
 
 Your AI coding agent just pasted a live API key into twelve `.env` files and three `.mcp.json` configs across half your projects. Now you have to rotate it: find every file, replace the value in whatever quoting style each one happens to use, and do it without leaking the new key into your shell history or a committed template. `rotate` does exactly that, in one command, without ever printing the secret.
 
