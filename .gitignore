@@ -5,3 +5,6 @@
 # transient rotate temp/backup artifacts (should never be committed)
 .rotate.*
 *.bak.*
+
+# local promo drafts (never publish)
+promo-drafts/
